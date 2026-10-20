@@ -1,0 +1,24 @@
+# Talos cluster: have VictoriaMetrics scrape the Pi collector.
+#
+# This manifest targets the VictoriaMetrics operator's VMScrapeConfig CRD —
+# VERIFY FIELD NAMES against your installed operator version, and confirm
+# that one of your VMAgents actually selects this resource (check
+# VMAgent.spec.scrapeNamespaceSelector / scrapeConfigSelector). Applying
+# the resource alone does not guarantee scraping.
+#
+# Replace PI_LAN_IP with the Pi's LAN address. Query endpoint: use your
+# existing VictoriaMetrics HTTP endpoint (e.g. http://vm:8428) — don't
+# assume port numbers; adjust to your deployment.
+apiVersion: operator.victoriametrics.com/v1beta1
+kind: VMScrapeConfig
+metadata:
+  name: watermeter-pi
+  namespace: monitoring
+spec:
+  staticConfigs:
+    - targets:
+        - PI_LAN_IP:9101
+        labels:
+          job: watermeter
+          site: home
+  scrapeInterval: 15s
