@@ -24,28 +24,39 @@ RUN CGO_ENABLED=0 go install github.com/bemasher/rtlamr@latest \
     && mkdir -p /out \
     && cp /go/bin/rtlamr /out/rtlamr
 
-# Stage 3: rtl_tcp (C, from osmocom/rtl-sdr) — the finicky part.
-# BUILD_SHARED_LIBS=OFF builds librtlsdr as a static library; with Alpine's
-# libusb-dev providing libusb.a this *should* link fully static. The check
-# at the end FAILS the build if the binary has an ELF interpreter or any
-# DT_NEEDED entries (checked with readelf — more reliable than ldd wording
-# under musl), so a broken stage cannot silently produce a scratch image
-# that won't run.
-# Fallback if this fights you: skip this stage, run rtl_tcp as a tiny
-# Alpine sidecar, and start the collector with -rtltcp-bin= (empty) and
-# -rtltcp-addr=<sidecar>:1234.
+# Stage 3: rtl_tcp (C, from osmocom/rtl-sdr).
+#
+# What broke the first build: cmake's default executable link prefers
+# shared libusb (and the dynamic musl loader), so `make rtl_tcp` produced
+# a dynamic binary and the static check correctly failed the build.
+#
+# Fix: use cmake ONLY to build the static libraries (rtlsdr_static,
+# convenience_static), then link rtl_tcp ourselves with `gcc -static`
+# against the archives. Verified: Alpine's libusb-dev ships the static
+# archive /usr/lib/libusb-1.0.a (pkgs.alpinelinux.org), musl links fully
+# static with build-base, and rtl_tcp.c compiles with just -I<include>.
+#
+# Fallback if this still fights you: drop this stage (and its final COPY),
+# run rtl_tcp as a tiny Alpine sidecar with its own USB access, and start
+# the collector with -rtltcp-bin= (empty) and -rtltcp-addr=<sidecar>:1234.
 FROM alpine:3.20 AS rtltcp
 RUN apk add --no-cache build-base binutils cmake git libusb-dev linux-headers
 RUN git clone --depth 1 https://github.com/osmocom/rtl-sdr /src
 WORKDIR /src/build
-RUN cmake -DCMAKE_BUILD_TYPE=Release -DBUILD_SHARED_LIBS=OFF -DINSTALL_UDEV_RULES=OFF .. \
-    && make -j"$(nproc)" rtl_tcp \
-    && if readelf -l /src/build/rtl_tcp | grep -q INTERP \
-         || readelf -d /src/build/rtl_tcp | grep -q NEEDED; \
+RUN mkdir -p /out \
+    && cmake -DCMAKE_BUILD_TYPE=Release -DINSTALL_UDEV_RULES=OFF .. \
+    && make -j"$(nproc)" rtlsdr_static convenience_static \
+    && gcc -static -o /out/rtl_tcp \
+        -I/src/include \
+        /src/src/rtl_tcp.c \
+        /src/build/librtlsdr.a /src/build/libconvenience_static.a \
+        /usr/lib/libusb-1.0.a \
+        -lpthread -lm \
+    && if readelf -l /out/rtl_tcp | grep -q INTERP \
+         || readelf -d /out/rtl_tcp | grep -q NEEDED; \
        then echo "ERROR: rtl_tcp is not fully static; scratch image will not run" && exit 1; \
        else echo "rtl_tcp is fully static: OK"; \
-       fi \
-    && mkdir -p /out && cp /src/build/rtl_tcp /out/rtl_tcp
+       fi
 
 # Final stage: scratch, nothing but static binaries.
 FROM scratch

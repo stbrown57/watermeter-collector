@@ -65,7 +65,7 @@ Useful flags: `-health-max-age` (healthz goes unhealthy if no decode within this
 
 ## CI/CD — GitHub Container Registry, no-touch updates
 
-`.github/workflows/release.yml` runs the unit tests first, then builds the arm64 image (QEMU-emulated on the amd64 runner) and pushes to `ghcr.io/<owner>/<repo>` on every push to `main` (tagged `latest` + git SHA) and on `v*` tags. **Name the repository `watermeter-collector`** so the image path matches the Quadlet reference (`ghcr.io/<owner>/watermeter-collector`).
+`.github/workflows/release.yml` runs the unit tests first, then builds the arm64 image (QEMU-emulated on the amd64 runner) and pushes to `ghcr.io/stbrown57/watermeter-collector` on every push to `main` (tagged `latest` + git SHA) and on `v*` tags. **Name the repository `watermeter-collector`** so the image path matches the Quadlet reference.
 
 On the Pi, the Quadlet references the registry image with `AutoUpdate=registry`; enable the rootless auto-update timer once:
 
@@ -76,7 +76,7 @@ systemctl --user enable --now podman-auto-update.timer
 If the ghcr.io package is **private**, the Pi needs a one-time persistent login (survives reboots) with a classic PAT that has `read:packages` scope:
 
 ```sh
-podman login ghcr.io -u <github-username>
+podman login ghcr.io -u stbrown57
 ```
 
 Update flow: merge to main → CI tests, builds, and pushes to ghcr.io → the Pi's auto-update timer pulls the new image and restarts the container. Fedora IoT's automatic OS update mechanism handles the OS layer independently (verify what your release ships). The whole node is no-touch.
@@ -85,7 +85,7 @@ Update flow: merge to main → CI tests, builds, and pushes to ghcr.io → the P
 
 ```sh
 mkdir -p ~/watermeter/data ~/.config/containers/systemd
-cp deploy/watermeter-collector.container ~/.config/containers/systemd/   # edit GHCR_OWNER
+cp deploy/watermeter-collector.container ~/.config/containers/systemd/   # image: ghcr.io/stbrown57/watermeter-collector
 loginctl enable-linger $USER              # start services at boot without a login
 systemctl --user daemon-reload
 systemctl --user start watermeter-collector.service
@@ -103,7 +103,7 @@ If firewalld is active on the Pi: `sudo firewall-cmd --add-port=9101/tcp --perma
 - **USB placement:** keep the SSD on USB 3 and put the SDR on a USB 2 port (or powered hub) — RTL-SDRs draw current and radiate RF; USB 3 is a known broadband noise source at 900 MHz.
 - **SELinux:** the `:Z` volume labels handle file contexts; if the container can't open the USB device, test with `--security-opt label=disable` to isolate the cause before relaxing anything.
 - **Antenna:** SMA, tuned near 915 MHz; place near the meter side of the house.
-- **Dockerfile:** the static `rtl_tcp` stage is **unverified until you run the first build** (CI will surface failures — the build deliberately fails if `rtl_tcp` isn't fully static, checked with `readelf` for ELF interpreter/NEEDED entries). Fallback: skip that stage, run `rtl_tcp` as a tiny Alpine sidecar, and start the collector with `-rtltcp-bin=` (empty) and `-rtltcp-addr=<sidecar>:1234`.
+- **Dockerfile:** the `rtl_tcp` static-link stage is now a two-step recipe (cmake builds the static libraries; `gcc -static` links rtl_tcp against `librtlsdr.a`, `libconvenience_static.a`, and Alpine's `libusb-1.0.a`) after the first build attempt failed with the naive `make rtl_tcp` (cmake links shared libusb by default). The build still deliberately fails if the binary isn't fully static (`readelf` INTERP/NEEDED check). Fallback: drop the stage (and its final `COPY`), run `rtl_tcp` as a tiny Alpine sidecar, and start the collector with `-rtltcp-bin=` (empty) and `-rtltcp-addr=<sidecar>:1234`.
 
 ## Later analysis / AI
 

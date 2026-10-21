@@ -8,16 +8,17 @@
 #     .github/workflows/release.yml on every push to main / version tag).
 #   - AutoUpdate=registry + the podman-auto-update.timer make the Pi pull
 #     and restart the container automatically when a new image is published.
-#   - Fedora IoT's Zincati handles OS updates independently.
+#   - Fedora IoT's automatic OS update mechanism handles the OS layer.
 #
-# Replace GHCR_OWNER with your GitHub username (or org).
+# The image is published by .github/workflows/release.yml to the GitHub
+# Container Registry under the stbrown57 account.
 [Unit]
 Description=Water meter ERT collector (rtl_tcp + rtlamr + metrics exporter)
 After=network-online.target
 Wants=network-online.target
 
 [Container]
-Image=ghcr.io/GHCR_OWNER/watermeter-collector:latest
+Image=ghcr.io/stbrown57/watermeter-collector:latest
 AutoUpdate=registry
 # Arguments to the collector binary:
 Exec=-meter-id 81623781 -msgtype=scm+ -raw-log /data/raw.jsonl -state-file /data/state.json
