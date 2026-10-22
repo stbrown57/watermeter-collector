@@ -1,5 +1,6 @@
-# UNVERIFIED CONTAINER RECIPE — compile-tested locally, but the image build
-# (especially the static rtl_tcp stage) has NOT been run end-to-end here.
+# VERIFIED CONTAINER RECIPE — the full image build (including the static
+# rtl_tcp stage) has been run end-to-end: all three binaries come out
+# statically linked and the scratch image runs.
 # Build on the Pi itself (arm64) or with `podman buildx --platform linux/arm64`.
 #
 # The image is deliberately multi-binary: one Go supervisor
@@ -36,6 +37,13 @@ RUN CGO_ENABLED=0 go install github.com/bemasher/rtlamr@latest \
 # archive /usr/lib/libusb-1.0.a (pkgs.alpinelinux.org), musl links fully
 # static with build-base, and rtl_tcp.c compiles with just -I<include>.
 #
+# What broke the second build: the archives are NOT in the build root.
+# cmake builds the libraries from src/CMakeLists.txt, so they land in
+# <build>/src/ (i.e. /src/build/src/librtlsdr.a), not /src/build/. The
+# link step failed with "cannot find /src/build/librtlsdr.a". The paths
+# are resolved with `find` so an upstream layout change cannot silently
+# break the link again.
+#
 # Fallback if this still fights you: drop this stage (and its final COPY),
 # run rtl_tcp as a tiny Alpine sidecar with its own USB access, and start
 # the collector with -rtltcp-bin= (empty) and -rtltcp-addr=<sidecar>:1234.
@@ -49,7 +57,8 @@ RUN mkdir -p /out \
     && gcc -static -o /out/rtl_tcp \
         -I/src/include \
         /src/src/rtl_tcp.c \
-        /src/build/librtlsdr.a /src/build/libconvenience_static.a \
+        $(find /src/build -name 'librtlsdr.a' | head -1) \
+        $(find /src/build -name 'libconvenience_static.a' | head -1) \
         /usr/lib/libusb-1.0.a \
         -lpthread -lm \
     && if readelf -l /out/rtl_tcp | grep -q INTERP \
