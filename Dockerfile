@@ -67,7 +67,17 @@ RUN mkdir -p /out \
        else echo "rtl_tcp is fully static: OK"; \
        fi
 
-# Final stage: scratch, nothing but static binaries.
+# Stage 4: minimal /etc/passwd + /etc/group for the root user, for the
+# scratch final image. A `FROM scratch` image ships no /etc/passwd (or /etc/
+# group); the OCI runtime (crun) resolves the container user via /etc/passwd,
+# so starting with an explicit user fails with:
+#   "unable to find user root: no matching entries in passwd file"
+# (exit 126). See the final stage below.
+FROM alpine:3.20 AS rootfiles
+RUN printf 'root:x:0:0:root:/root:/bin/sh\n' > /etc/passwd \
+    && printf 'root:x:0:\n' > /etc/group
+
+# Final stage: scratch, nothing but static binaries + the root passwd/group files.
 # Explicitly run as root - this is a rootful container deployment (rootful
 # Podman / systemd Quadlet); the collector needs host-level access to the
 # RTL-SDR USB bus and keeps state under /data on the host.
@@ -76,4 +86,6 @@ USER root
 COPY --from=collector /out/watermeter-collector /watermeter-collector
 COPY --from=rtltcp /out/rtl_tcp /usr/local/bin/rtl_tcp
 COPY --from=rtlamr /out/rtlamr /usr/local/bin/rtlamr
+COPY --from=rootfiles /etc/passwd /etc/passwd
+COPY --from=rootfiles /etc/group /etc/group
 ENTRYPOINT ["/watermeter-collector"]
