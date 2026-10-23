@@ -68,7 +68,11 @@ RUN mkdir -p /out \
        fi
 
 # Final stage: scratch, nothing but static binaries.
+# Explicitly run as root - this is a rootful container deployment (rootful
+# Podman / systemd Quadlet); the collector needs host-level access to the
+# RTL-SDR USB bus and keeps state under /data on the host.
 FROM scratch
+USER root
 COPY --from=collector /out/watermeter-collector /watermeter-collector
 COPY --from=rtltcp /out/rtl_tcp /usr/local/bin/rtl_tcp
 COPY --from=rtlamr /out/rtlamr /usr/local/bin/rtlamr

@@ -67,10 +67,10 @@ Useful flags: `-health-max-age` (healthz goes unhealthy if no decode within this
 
 `.github/workflows/release.yml` runs the unit tests first, then builds the arm64 image (QEMU-emulated on the amd64 runner) and pushes to `ghcr.io/stbrown57/watermeter-collector` on every push to `main` (tagged `latest` + git SHA) and on `v*` tags. **Name the repository `watermeter-collector`** so the image path matches the Quadlet reference.
 
-On the Pi, the Quadlet references the registry image with `AutoUpdate=registry`; enable the rootless auto-update timer once:
+On the Pi, the Quadlet references the registry image with `AutoUpdate=registry`; enable the rootful auto-update timer once:
 
 ```sh
-systemctl --user enable --now podman-auto-update.timer
+sudo systemctl enable --now podman-auto-update.timer
 ```
 
 If the ghcr.io package is **private**, the Pi needs a one-time persistent login (survives reboots) with a classic PAT that has `read:packages` scope:
@@ -81,15 +81,23 @@ podman login ghcr.io -u stbrown57
 
 Update flow: merge to main → CI tests, builds, and pushes to ghcr.io → the Pi's auto-update timer pulls the new image and restarts the container. Fedora IoT's automatic OS update mechanism handles the OS layer independently (verify what your release ships). The whole node is no-touch.
 
-## Deploy on the Fedora IoT edge node (rootless Podman Quadlet)
+## Deploy on the Fedora IoT edge node (rootful Podman Quadlet)
+
+The collector now runs as a **rootful** Podman container (systemd system unit via Quadlet). The image is rootful by design (`USER root` in the final stage), because it needs host-level access to the RTL-SDR USB bus and keeps state on the host.
 
 ```sh
-mkdir -p ~/watermeter/data ~/.config/containers/systemd
-cp deploy/watermeter-collector.container ~/.config/containers/systemd/   # image: ghcr.io/stbrown57/watermeter-collector
-loginctl enable-linger $USER              # start services at boot without a login
-systemctl --user daemon-reload
-systemctl --user start watermeter-collector.service
+sudo mkdir -p /var/lib/watermeter/data
+sudo cp deploy/watermeter-collector.container /etc/containers/systemd/   # image: ghcr.io/stbrown57/watermeter-collector
+sudo systemctl daemon-reload
+sudo systemctl enable --now watermeter-collector.service
 ```
+
+Key differences vs. the old rootless setup:
+
+- The Quadlet unit lives in the **system** directory (`/etc/containers/systemd/`), not `~/.config/containers/systemd/`, and the generated service is enabled as a **system** unit (`systemctl enable --now watermeter-collector.service`). No `loginctl enable-linger` needed.
+- The data volume is now a root-owned host path: `Volume=/var/lib/watermeter/data:/data:Z` (created on first start if missing). The old `%h`-relative rootless path (`~/watermeter/data`) no longer applies.
+- USB access via `AddDevice=/dev/bus/usb` runs under rootful Podman (no user-namespace device mapping).
+- The auto-update timer is the **system** timer: `sudo systemctl enable --now podman-auto-update.timer`.
 
 The collector publishes `:9101/metrics` on the LAN. **Pick one primary ingestion path** (running both duplicates series):
 
