@@ -77,6 +77,38 @@ FROM alpine:3.20 AS rootfiles
 RUN printf 'root:x:0:0:root:/root:/bin/sh\n' > /etc/passwd \
     && printf 'root:x:0:\n' > /etc/group
 
+# Stage 5: SDR diagnostic image — Alpine-based (provides /bin/sh) plus the
+# full set of osmocom RTL-SDR helper tools (rtl_tcp, rtl_test, rtl_eeprom,
+# rtl_fm, rtl_adsb, rtl_power, rtl_biast) built the same way as the production
+# rtl_tcp, plus the collector and rtlamr binaries.
+#
+# Why this exists: the final production image is FROM scratch — no shell, no
+# package manager, no SDR tools — so when the collector pod runs but no water
+# data arrives, there is no way to run diagnostics from inside the container.
+# This diag stage is what feeds the watermeter-sdr-diagnostic debug pod
+# (deploy/diagnostics/), which runs the SDR chain behind a real shell.
+FROM alpine:3.20 AS diag
+RUN apk add --no-cache --virtual .build-deps \
+        build-base binutils cmake git libusb-dev linux-headers \
+    && git clone --depth 1 https://github.com/osmocom/rtl-sdr /src \
+    && mkdir -p /src/build \
+    && cd /src/build \
+    && cmake -DCMAKE_BUILD_TYPE=Release -DINSTALL_UDEV_RULES=OFF .. \
+    && make -j"$(nproc)" all \
+    && cp /src/build/rtl_tcp /src/build/rtl_test /src/build/rtl_eeprom /src/build/rtl_fm \
+          /src/build/rtl_adsb /src/build/rtl_power /src/build/rtl_biast /usr/local/bin/ \
+    && apk del .build-deps \
+    && apk add --no-cache libusb
+COPY --from=collector /out/watermeter-collector /usr/local/bin/watermeter-collector
+COPY --from=rtlamr /out/rtlamr /usr/local/bin/rtlamr
+COPY --from=rootfiles /etc/passwd /etc/passwd
+COPY --from=rootfiles /etc/group /etc/group
+COPY deploy/diagnostics/sdr-diag.sh /sdr-diag.sh
+RUN chmod +x /sdr-diag.sh
+EXPOSE 1234
+ENTRYPOINT ["/sdr-diag.sh"]
+WORKDIR /
+
 # Final stage: scratch, nothing but static binaries + the root passwd/group files.
 # Explicitly run as root - this is a rootful container deployment (rootful
 # Podman / systemd Quadlet); the collector needs host-level access to the

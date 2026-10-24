@@ -63,6 +63,67 @@ go build -o watermeter-collector .
 
 Useful flags: `-health-max-age` (healthz goes unhealthy if no decode within this window), `-rtltcp-bin=` (empty = external rtl_tcp server via `-rtltcp-addr`).
 
+## SDR diagnostics pod (debug)
+
+The production collector image is `FROM scratch` — no shell, no package manager, no SDR tools. So when the pod starts but no water data shows up (`watermeter_last_message_timestamp_seconds` goes stale, `/healthz` goes unhealthy, `watermeter_register` stays empty), you can't run `rtl_tcp` / `rtlamr` / `rtl_test` / `rtl_eeprom` from inside the collector container to find out why.
+
+The `Dockerfile` therefore includes a second stage, **`diag`**, that produces the **`watermeter-sdr-diagnostic`** image: an Alpine-based image (real `/bin/sh`) plus the full set of osmocom RTL-SDR helper tools and the collector / rtlamr binaries. It backs this debug pod:
+
+- `deploy/diagnostics/sdr-diag.sh` — entrypoint: boots `rtl_tcp -a 127.0.0.1:1234`, waits (up to 60 s) for the dongle, cats `/tmp/sdr-diag/rtl_tcp.log`, then runs `rtlamr -server=127.0.0.1:1234 -format=json -msgtype=all -filterid=<id> -symbollength=72 -unique=false` (→ `/tmp/sdr-diag/rtlamr.log`).
+- `deploy/diagnostics/watermeter-sdr-diagnostic.container` — Quadlet unit for the pod.
+
+Build + publish the debug image (the release workflow only publishes the production `scratch` image):
+
+```sh
+podman build -f Dockerfile -t ghcr.io/stbrown57/watermeter-sdr-diagnostic:latest --target diag .
+podman push ghcr.io/stbrown57/watermeter-sdr-diagnostic:latest
+```
+
+Install + start on the edge node:
+
+```sh
+sudo cp deploy/diagnostics/watermeter-sdr-diagnostic.container /etc/containers/systemd/
+sudo systemctl daemon-reload
+sudo systemctl start watermeter-sdr-diagnostic.service
+sudo journalctl -u watermeter-sdr-diagnostic.service -f
+```
+
+Tunable behavior via environment (defaults shown):
+
+| Env | Meaning | Default |
+|---|---|---|
+| `RTL_TCP_ADDR` | rtl_tcp listen address | `127.0.0.1:1234` |
+| `RTL_TCP_FREQ` | rtl_tcp center frequency [Hz] | driver default |
+| `RTL_TCP_GAIN` | rtl_tcp tuner gain [dB] | `0` (auto) |
+| `RTL_TCP_SAMPLERATE` | rtl_tcp sample rate [Hz] | driver default |
+| `RTL_TCP_PPM` | rtl_tcp tuner ppm correction | `0` |
+| `METER_ID` | rtlamr ERT id filter | `81623781` |
+| `MSG_TYPE` | rtlamr message type filter | `all` |
+| `SYMBOL_LENGTH` | rtlamr symbol length | `72` |
+
+Inspecting a running pod (the image has a shell):
+
+```sh
+podman exec -it watermeter-sdr-diagnostic sh
+cat /tmp/sdr-diag/rtl_tcp.log     # dongle open, "Tuned to ...", WARNING: Failed to..., listening...
+cat /tmp/sdr-diag/rtlamr.log      # decoded JSON stream + rtlamr errors
+rtl_eeprom -d 0                   # EEPROM contents
+rtl_test -s 2048000 -d 0 -p 10   # RTL hardware / tuner loopback test
+rtlamr -server=127.0.0.1:1234 -format=json -msgtype=all -filterid=81623781
+```
+
+### Troubleshooting via the debug pod
+
+1. **No USB / dongle found:** `rtl_tcp.log` should print the device open result and `listening...`. If `WARNING: Failed to open rtlsdr device` → USB attach/cable/port issue. Fix at the host level (`lsusb`, udev) or retry with a different USB port / powered hub.
+2. **SDR configured wrong (no decodes):** rerun the tools with explicit tuning, e.g. `rtl_tcp -a 127.0.0.1:1234 -f 915000000 -g 20 -s 2048000 -P 0` (then `rtlamr -server=127.0.0.1:1234 -format=json -msgtype=all -filterid=81623781`) and watch for `Tuned to ...` / tuner warnings in the log.
+3. **Hardware fault:** `rtl_test -s 2048000 -d 0 -p 10` runs the tuner/ADC loopback; non-zero errors indicate a broken dongle.
+4. **Decode-level problem:** `rtlamr.log` should show JSON lines for your meter ID; empty output with `listening...` means the SDR chain is up but the meter isn't being heard.
+
+Notes:
+
+- Run the debug pod while the production collector is stopped (`systemctl stop watermeter-collector`) so both don't fight over the same USB device; the debug pod mounts the same `/dev/bus/usb`.
+- The debug pod publishes no ports (rtl_tcp/rtlamr talk over loopback inside the container) and keeps its logs in the container filesystem (`/tmp/sdr-diag/`) plus the systemd journal.
+
 ## CI/CD — GitHub Container Registry, no-touch updates
 
 `.github/workflows/release.yml` runs the unit tests first, then builds the arm64 image (QEMU-emulated on the amd64 runner) and pushes to `ghcr.io/stbrown57/watermeter-collector` on every push to `main` (tagged `latest` + git SHA) and on `v*` tags. **Name the repository `watermeter-collector`** so the image path matches the Quadlet reference.

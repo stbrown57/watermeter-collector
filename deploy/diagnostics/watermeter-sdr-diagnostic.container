@@ -1,0 +1,53 @@
+# Quadlet unit for the water meter SDR diagnostic pod (edge node: Pi 4B / Fedora IoT).
+#
+# Install to: /etc/containers/systemd/watermeter-sdr-diagnostic.container
+#
+# Purpose: run the RTL-SDR chain (rtl_tcp -> rtlamr, plus rtl_eeprom / rtl_test)
+# behind a real shell, for diagnosing SDR configuration / operation.
+#
+# Why this pod exists: the production collector image is FROM scratch (no shell,
+# no SDR tools), so when the pod starts but no water data shows up
+# (watermeter_last_message_timestamp_seconds goes stale / /healthz unhealthy)
+# there is no way to run diagnostics from inside the collector container.
+#
+# Start / stop:
+#   sudo systemctl start watermeter-sdr-diagnostic.service
+#   sudo systemctl stop  watermeter-sdr-diagnostic.service
+#   sudo journalctl -u watermeter-sdr-diagnostic.service -f
+#
+# Logs:
+#   The pod archives rtl_tcp + rtlamr output under /tmp/sdr-diag/ inside the
+#   container and echoes the rtl_tcp preamble; use:
+#     sudo journalctl -u watermeter-sdr-diagnostic.service -f
+#
+# Shell access inside the running pod (image is Alpine-based, has /bin/sh):
+#   podman exec -it watermeter-sdr-diagnostic sh
+#
+# In-pod diagnostic commands:
+#   cat /tmp/sdr-diag/rtl_tcp.log    # dongle/tuner open, "Tuned to ...", warnings
+#   cat /tmp/sdr-diag/rtlamr.log     # decoded JSON stream + rtlamr errors
+#   rtl_eeprom -d 0                  # EEPROM contents (tuner config)
+#   rtl_test -s 2048000 -d 0 -p 10  # RTL hardware / tuner loopback test
+#   rtlamr -server=127.0.0.1:1234 -format=json -msgtype=all -filterid=81623781
+
+[Unit]
+Description=Water meter SDR diagnostic pod (rtl_tcp + rtlamr + RTL tools)
+After=network-online.target
+Wants=network-online.target
+
+[Container]
+Image=ghcr.io/stbrown57/watermeter-sdr-diagnostic:latest
+ContainerName=watermeter-sdr-diagnostic
+User=root
+AddDevice=/dev/bus/usb
+StopTimeout=30
+
+[Service]
+# Diagnostic only: opt-in via `systemctl start`, do NOT enable at boot by
+# default (it would hold the RTL-SDR bus and fight the production collector).
+Restart=never
+
+[Install]
+# WantedBy=multi-user.target
+# (uncomment + `systemctl enable --now watermeter-sdr-diagnostic.service`
+# only if you want this debug pod running standalone at boot)
