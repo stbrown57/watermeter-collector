@@ -320,6 +320,9 @@ func (c *collector) handleLine(line []byte) {
 	if len(line) == 0 {
 		return
 	}
+	if line[0] != '{' {
+		return
+	}
 	var l rtlamrLine
 	if err := json.Unmarshal(line, &l); err != nil {
 		log.Printf("unparsable rtlamr line: %v", err)
