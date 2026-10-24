@@ -78,9 +78,9 @@ RUN printf 'root:x:0:0:root:/root:/bin/sh\n' > /etc/passwd \
     && printf 'root:x:0:\n' > /etc/group
 
 # Stage 5: SDR diagnostic image — Alpine-based (provides /bin/sh) plus the
-# full set of osmocom RTL-SDR helper tools (rtl_tcp, rtl_test, rtl_eeprom,
-# rtl_fm, rtl_adsb, rtl_power, rtl_biast) built the same way as the production
-# rtl_tcp, plus the collector and rtlamr binaries.
+# RTL-SDR helper tools needed for diagnostics (rtl_tcp, rtl_test, rtl_eeprom)
+# built the same way as the production rtl_tcp, plus the collector and rtlamr
+# binaries.
 #
 # Why this exists: the final production image is FROM scratch — no shell, no
 # package manager, no SDR tools — so when the collector pod runs but no water
@@ -94,11 +94,31 @@ RUN apk add --no-cache --virtual .build-deps \
     && mkdir -p /src/build \
     && cd /src/build \
     && cmake -DCMAKE_BUILD_TYPE=Release -DINSTALL_UDEV_RULES=OFF .. \
-    && make -j"$(nproc)" all \
-    && cp /src/build/rtl_tcp /src/build/rtl_test /src/build/rtl_eeprom /src/build/rtl_fm \
-          /src/build/rtl_adsb /src/build/rtl_power /src/build/rtl_biast /usr/local/bin/ \
-    && apk del .build-deps \
-    && apk add --no-cache libusb
+    && make -j"$(nproc)" rtlsdr_static convenience_static \
+    && mkdir -p /out \
+    && gcc -static -o /out/rtl_tcp \
+        -I/src/include \
+        /src/src/rtl_tcp.c \
+        $(find /src/build -name 'librtlsdr.a' | head -1) \
+        $(find /src/build -name 'libconvenience_static.a' | head -1) \
+        /usr/lib/libusb-1.0.a \
+        -lpthread -lm \
+    && gcc -static -o /out/rtl_test \
+        -I/src/include \
+        /src/src/rtl_test.c \
+        $(find /src/build -name 'librtlsdr.a' | head -1) \
+        $(find /src/build -name 'libconvenience_static.a' | head -1) \
+        /usr/lib/libusb-1.0.a \
+        -lpthread -lm \
+    && gcc -static -o /out/rtl_eeprom \
+        -I/src/include \
+        /src/src/rtl_eeprom.c \
+        $(find /src/build -name 'librtlsdr.a' | head -1) \
+        $(find /src/build -name 'libconvenience_static.a' | head -1) \
+        /usr/lib/libusb-1.0.a \
+        -lpthread -lm \
+    && cp /out/rtl_tcp /out/rtl_test /out/rtl_eeprom /usr/local/bin/ \
+    && apk del .build-deps
 COPY --from=collector /out/watermeter-collector /usr/local/bin/watermeter-collector
 COPY --from=rtlamr /out/rtlamr /usr/local/bin/rtlamr
 COPY --from=rootfiles /etc/passwd /etc/passwd
