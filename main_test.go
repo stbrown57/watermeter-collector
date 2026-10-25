@@ -18,7 +18,7 @@ func newTestCollector(t *testing.T, rollover uint64, statePath string) *collecto
 
 // msg builds an rtlamr-style JSON line for the given meter and consumption.
 func msg(id, consumption uint64) []byte {
-	return []byte(fmt.Sprintf(`{"Time":"2026-10-20T10:00:00-04:00","Type":"SCM+","Message":{"ERTSerialNumber":%d,"Consumption":%d}}`, id, consumption))
+	return fmt.Appendf(nil, `{"Time":"2026-10-20T10:00:00-04:00","Type":"SCM+","Message":{"ERTSerialNumber":%d,"Consumption":%d}}`, id, consumption)
 }
 
 func (c *collector) usage(t *testing.T) float64 {
@@ -95,7 +95,7 @@ func TestSpuriousResetRecovery(t *testing.T) {
 	c := newTestCollector(t, 0, "")
 	c.handleLine(msg(81623781, 100))
 	c.handleLine(msg(81623781, 50))
-	c.handleLine(msg(81623781, 50)) // confirmed reset (wrongly)
+	c.handleLine(msg(81623781, 50))  // confirmed reset (wrongly)
 	c.handleLine(msg(81623781, 107)) // contradicts: reverts to pre-reset baseline
 	if got := c.usage(t); got != 7 {
 		t.Fatalf("usage = %v, want 7 (spurious reset reverted)", got)
