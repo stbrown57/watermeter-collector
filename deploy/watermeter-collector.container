@@ -26,7 +26,7 @@ AutoUpdate=registry
 # its state + raw archive under /data on the host filesystem.
 User=root
 # Arguments to the collector binary:
-Exec=-meter-id 81623781 -msgtype=scm+ -raw-log /data/raw.jsonl -state-file /data/state.json
+Exec=-meter-id 81623781 -msgtype=scm+ -raw-log /data/raw.jsonl -state-file /data/state.json -center-freq 915000000
 # Raw message archive + persisted baseline survive restarts and OS updates:
 # (rootful host path - created on first start if missing)
 Volume=/var/lib/watermeter/data:/data:Z

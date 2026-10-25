@@ -446,6 +446,7 @@ func main() {
 		rtltcpAddr   = flag.String("rtltcp-addr", "127.0.0.1:1234", "address of the rtl_tcp server to use/connect to")
 		rtlamrBin    = flag.String("rtlamr-bin", "/usr/local/bin/rtlamr", "path to rtlamr binary")
 		msgTypes     = flag.String("msgtype", "scm+", "rtlamr message types (comma separated: scm,scm+,idm,...)")
+		centerFreq   = flag.Uint64("center-freq", 915000000, "center frequency for rtlamr (Itron ERT band default: 915000000 = 915 MHz)")
 		rawLog       = flag.String("raw-log", "", "path to a JSONL file archiving every decoded message (optional)")
 		stateFile    = flag.String("state-file", "", "path to a JSON state file persisting the reading baseline across restarts (recommended)")
 		listenAddr   = flag.String("listen", ":9101", "HTTP listen address for /metrics and /healthz")
@@ -500,6 +501,7 @@ func main() {
 			"-msgtype="+*msgTypes,
 			"-filterid="+strconv.FormatUint(*meterID, 10),
 			"-unique=false",
+			"-centerfreq="+strconv.FormatUint(*centerFreq, 10),
 		)
 		cmd.Stderr = os.Stderr
 		return cmd
