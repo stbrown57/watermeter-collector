@@ -64,3 +64,22 @@ jobs:
           push: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
+
+      - uses: docker/metadata-action@v5
+        id: meta_diag
+        with:
+          images: ${{ env.REGISTRY }}/watermeter-sdr-diagnostic
+          tags: |
+            type=ref,event=branch
+            type=semver,pattern={{version}}
+            type=sha
+            type=raw,value=latest,enable={{is_default_branch}}
+
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          target: diag
+          platforms: linux/arm64
+          push: true
+          tags: ${{ steps.meta_diag.outputs.tags }}
+          labels: ${{ steps.meta_diag.outputs.labels }}
